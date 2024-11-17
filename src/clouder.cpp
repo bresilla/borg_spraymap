@@ -36,6 +36,7 @@ class CloudAdder: public rclcpp::Node{
         message_filters::Subscriber<nav_msgs::msg::Odometry> odom_sub_;
         std::shared_ptr<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, nav_msgs::msg::Odometry>>> sync_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_publisher_;
+        rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr corr_publisher_;
 
     public:
             CloudAdder(): Node("minimal_publisher"), count_(0) {
@@ -48,6 +49,7 @@ class CloudAdder: public rclcpp::Node{
             sync_->registerCallback(std::bind(&CloudAdder::alt_callback, this, std::placeholders::_1, std::placeholders::_2));
 
             cloud_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/added/cloud", 10);
+            corr_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/corr/cloud", 10);
         }
 
     private:
@@ -77,7 +79,7 @@ class CloudAdder: public rclcpp::Node{
 
         sensor_msgs::msg::PointCloud2 cloud_maker(const std::vector<std::vector<float>>& cloud_array) {
             sensor_msgs::msg::PointCloud2 added_cloud;
-            added_cloud.header.frame_id = "/fbot/map";
+            added_cloud.header.frame_id = "fbot/map";
             added_cloud.header.stamp = this->now();
             added_cloud.height = 1;
             added_cloud.width = cloud_array.size();

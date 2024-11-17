@@ -65,7 +65,7 @@ class CloudJoiner: public rclcpp::Node{
             all_points.insert(all_points.end(), transformed_left_points.begin(), transformed_left_points.end());
             all_points.insert(all_points.end(), transformed_right_points.begin(), transformed_right_points.end());
 
-            sensor_msgs::msg::PointCloud2 added_cloud = cloud_maker(all_points, std::string("/fbot/base_link"));
+            sensor_msgs::msg::PointCloud2 added_cloud = cloud_maker(all_points, std::string("fbot/base_link"));
             added_cloud.header.stamp = point_msg_1->header.stamp;
             cloud_publisher_->publish(added_cloud);
         }
