@@ -36,13 +36,12 @@ class CloudAdder: public rclcpp::Node{
         message_filters::Subscriber<nav_msgs::msg::Odometry> odom_sub_;
         std::shared_ptr<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, nav_msgs::msg::Odometry>>> sync_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_publisher_;
-   
+
     public:
             CloudAdder(): Node("minimal_publisher"), count_(0) {
             publisher_ = this->create_publisher<std_msgs::msg::String>("topic", 10);
-            // timer_ = this->create_wall_timer(500ms, std::bind(&CloudAdder::timer_callback, this))
             point_sub_.subscribe(this, "/all/cloud");
-            odom_sub_.subscribe(this, "/fix/odom");
+            odom_sub_.subscribe(this, "/fbot/loc/odom");
 
             sync_ = std::make_shared<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, nav_msgs::msg::Odometry>>>(10);
             sync_->connectInput(point_sub_, odom_sub_);
@@ -53,16 +52,16 @@ class CloudAdder: public rclcpp::Node{
 
     private:
         void alt_callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& point_msg, const nav_msgs::msg::Odometry::ConstSharedPtr& odom_msg) {
-            // RCLCPP_INFO(this->get_logger(), "Received point cloud and odometry");
+            RCLCPP_INFO(this->get_logger(), "Received point cloud and odometry");
             geometry_msgs::msg::Point position = odom_msg->pose.pose.position;
             // std::array<float, 4> translation = {position.x, position.y, position.z, 1};
             Eigen::Vector4f translation_e = {position.x, position.y, position.z, 1};
-            
+
             geometry_msgs::msg::Quaternion orientation = odom_msg->pose.pose.orientation;
             // std::array<float, 4> rotation = {orientation.x, orientation.y, orientation.z, orientation.w};
             Eigen::Vector4f rotation_e = {orientation.x, orientation.y, orientation.z, orientation.w};
-            
-            // auto transformation_matrix = compose_transformation_matrix(translation, rotation);            
+
+            // auto transformation_matrix = compose_transformation_matrix(translation, rotation);
             auto transformation_matrix = compose_transformation_matrix(translation_e, rotation_e);
             sensor_msgs::PointCloud2ConstIterator<float> pt(*point_msg, "x");
 
@@ -78,7 +77,7 @@ class CloudAdder: public rclcpp::Node{
 
         sensor_msgs::msg::PointCloud2 cloud_maker(const std::vector<std::vector<float>>& cloud_array) {
             sensor_msgs::msg::PointCloud2 added_cloud;
-            added_cloud.header.frame_id = "map";
+            added_cloud.header.frame_id = "/fbot/map";
             added_cloud.header.stamp = this->now();
             added_cloud.height = 1;
             added_cloud.width = cloud_array.size();
@@ -162,14 +161,6 @@ class CloudAdder: public rclcpp::Node{
                 }
             }
             return Eigen::Map<Eigen::Matrix<float, 4, 4, Eigen::RowMajor>>(transformation_matrix.data()->data());
-        }
-
-        void timer_callback() {
-            auto message = std_msgs::msg::String();
-            count_ += 2;
-            message.data = "Hello, world! " + std::to_string(count_);
-            RCLCPP_INFO(this->get_logger(), "Publishing: '%s'", message.data.c_str());
-            publisher_->publish(message);
         }
 };
 

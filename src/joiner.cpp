@@ -33,8 +33,9 @@ class CloudJoiner: public rclcpp::Node{
         std::shared_ptr<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::PointCloud2>>> sync_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_publisher_;
         int height_threshold = 0.15;
-        int width_threshold = 3;
-   
+        int width_thresh_max = 3;
+        int width_thresh_min = 0.8;
+
     public:
             CloudJoiner(): Node("pointcloud_joiner") {
                 // timer_ = this->create_wall_timer(500ms, std::bind(&CloudAdder::timer_callback, this))
@@ -50,10 +51,12 @@ class CloudJoiner: public rclcpp::Node{
 
     private:
         void callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& point_msg_1, const sensor_msgs::msg::PointCloud2::ConstSharedPtr& point_msg_2) {
-            std::array<float, 3> left_translation = {3.0, -0.2, 1.5};
-            std::array<float, 3> left_rotation = {pi/2, pi, pi/2};
-            std::array<float, 3> right_translation = {3.0, 0.2, 1.5};
-            std::array<float, 3> right_rotation = {-(pi/2), pi, -(pi/2)};
+            RCLCPP_INFO(this->get_logger(), "Received two point clouds");
+            std::array<float, 3> right_translation = {3.0, -0.2, 1.5};
+            std::array<float, 3> right_rotation = {(pi/2), pi, (pi/2)};
+            std::array<float, 3> left_translation = {3.0, 0.2, 1.5};
+            std::array<float, 3> left_rotation = {-(pi/2), pi, (pi/2)};
+            //swap left and right
             // sensor_msgs::msg::PointCloud2 transformed_cloud_1 = transform_cloud(point_msg_1, left_translation, left_rotation);
             std::vector<std::vector<float>> transformed_left_points = transformed_points(point_msg_1, left_translation, left_rotation);
             std::vector<std::vector<float>> transformed_right_points = transformed_points(point_msg_2, right_translation, right_rotation);
@@ -62,12 +65,63 @@ class CloudJoiner: public rclcpp::Node{
             all_points.insert(all_points.end(), transformed_left_points.begin(), transformed_left_points.end());
             all_points.insert(all_points.end(), transformed_right_points.begin(), transformed_right_points.end());
 
-            sensor_msgs::msg::PointCloud2 added_cloud = cloud_maker(all_points, std::string("base_link"));
+            sensor_msgs::msg::PointCloud2 added_cloud = cloud_maker(all_points, std::string("/fbot/base_link"));
             added_cloud.header.stamp = point_msg_1->header.stamp;
             cloud_publisher_->publish(added_cloud);
         }
 
-        std::vector<std::vector<float>> transformed_points(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& point_msg, std::array<float, 3> translation, std::array<float, 3> rotation){
+
+        std::vector<std::vector<float>> transformed_points(
+            const sensor_msgs::msg::PointCloud2::ConstSharedPtr& point_msg,
+            std::array<float, 3> translation,
+            std::array<float, 3> rotation) {
+
+            float x = translation[0], y = translation[1], z = translation[2];
+            float roll = rotation[0], pitch = rotation[1], yaw = rotation[2];
+
+            Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
+            transform(0, 3) = x;
+            transform(1, 3) = y;
+            transform(2, 3) = z;
+            transform(0, 0) = std::cos(roll) * std::cos(pitch);
+            transform(0, 1) = std::cos(roll) * std::sin(pitch) * std::sin(yaw) - std::sin(roll) * std::cos(yaw);
+            transform(0, 2) = std::cos(roll) * std::sin(pitch) * std::cos(yaw) + std::sin(roll) * std::sin(yaw);
+            transform(1, 0) = std::sin(roll) * std::cos(pitch);
+            transform(1, 1) = std::sin(roll) * std::sin(pitch) * std::sin(yaw) + std::cos(roll) * std::cos(yaw);
+            transform(1, 2) = std::sin(roll) * std::sin(pitch) * std::cos(yaw) - std::cos(roll) * std::sin(yaw);
+            transform(2, 0) = -std::sin(pitch);
+            transform(2, 1) = std::cos(pitch) * std::sin(yaw);
+            transform(2, 2) = std::cos(pitch) * std::cos(yaw);
+
+            std::vector<std::vector<float>> transformed_points;
+
+            for (sensor_msgs::PointCloud2ConstIterator<float> iter_x(*point_msg, "x"), iter_y(*point_msg, "y"), iter_z(*point_msg, "z");
+                 iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
+
+                float distance = std::sqrt(iter_x[0] * iter_x[0] + iter_y[0] * iter_y[0] + iter_z[0] * iter_z[0]);
+                if (distance < 0.8) {
+                    continue;
+                }
+
+                if (iter_x[0] > width_thresh_max || iter_x[0] < -width_thresh_max) {
+                    continue;
+                }
+
+                Eigen::Vector4f point = {iter_x[0], iter_y[0], iter_z[0], 1};
+                Eigen::Vector4f transformed_point = transform * point;
+
+                if (transformed_point[2] < height_threshold) {
+                    continue;
+                }
+
+                std::vector<float> transformed_point_array = {transformed_point[0], transformed_point[1], transformed_point[2]};
+                transformed_points.push_back(transformed_point_array);
+            }
+
+            return transformed_points;
+        }
+
+        std::vector<std::vector<float>> transformed_points2(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& point_msg, std::array<float, 3> translation, std::array<float, 3> rotation){
             float x = translation[0], y = translation[1], z = translation[2];
             float roll = rotation[0], pitch = rotation[1], yaw = rotation[2];
             Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
@@ -85,7 +139,7 @@ class CloudJoiner: public rclcpp::Node{
             transform(2,2) = std::cos(pitch)*std::cos(yaw);
             std::vector<std::vector<float>> transformed_points;
             for (sensor_msgs::PointCloud2ConstIterator<float> iter_x(*point_msg, "x"), iter_y(*point_msg, "y"), iter_z(*point_msg, "z"); iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z){
-                if (iter_x[0] > width_threshold || iter_x[0] < -width_threshold) { continue; }
+                if (iter_x[0] > width_thresh_max || iter_x[0] < -width_thresh_max) { continue; }
                 Eigen::Vector4f point = {iter_x[0], iter_y[0], iter_z[0], 1};
                 Eigen::Vector4f transformed_point = transform*point;
                 if (transformed_point[2] < height_threshold) { continue; }
